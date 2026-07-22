@@ -42,8 +42,8 @@ public class TigerGraphWrapperDriver implements Driver {
 
     private static final Logger log = LoggerFactory.getLogger(TigerGraphWrapperDriver.class);
 
-    private static final String WRAPPER_VERSION = "1.0.0";
-    private static final String TG_DRIVER_CLASS = "com.tigergraph.jdbc.restpp.RestppDriver";
+    private static final String WRAPPER_VERSION = "1.0.1";
+    private static final String TG_DRIVER_CLASS = "com.tigergraph.jdbc.Driver";
 
     private static final Driver TG_DRIVER;
 
