@@ -6,12 +6,12 @@ import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class TigerGraphSSLWrapperTest {
+class TigerGraphWrapperDriverTest {
 
     @Test
     void injectUrlParams_injectsAllQueryParams() {
         Properties props = new Properties();
-        int count = TigerGraphSSLWrapper.injectUrlParams(
+        int count = TigerGraphWrapperDriver.injectUrlParams(
                 "jdbc:tg:https://host:14200?graph=MY_GRAPH&trustStore=/path/cacerts&trustStorePassword=changeit&trustStoreType=JKS",
                 props);
 
@@ -26,7 +26,7 @@ class TigerGraphSSLWrapperTest {
     void injectUrlParams_doesNotOverrideExistingProps() {
         Properties props = new Properties();
         props.setProperty("graph", "ALREADY_SET");
-        int count = TigerGraphSSLWrapper.injectUrlParams(
+        int count = TigerGraphWrapperDriver.injectUrlParams(
                 "jdbc:tg:https://host:14200?graph=NEW_VALUE&trustStore=/path/cacerts",
                 props);
 
@@ -38,7 +38,7 @@ class TigerGraphSSLWrapperTest {
     @Test
     void injectUrlParams_noQueryString_returnsZero() {
         Properties props = new Properties();
-        int count = TigerGraphSSLWrapper.injectUrlParams("jdbc:tg:https://host:14200", props);
+        int count = TigerGraphWrapperDriver.injectUrlParams("jdbc:tg:https://host:14200", props);
         assertEquals(0, count);
         assertTrue(props.isEmpty());
     }
@@ -46,13 +46,13 @@ class TigerGraphSSLWrapperTest {
     @Test
     void injectUrlParams_emptyQueryString_returnsZero() {
         Properties props = new Properties();
-        int count = TigerGraphSSLWrapper.injectUrlParams("jdbc:tg:https://host:14200?", props);
+        int count = TigerGraphWrapperDriver.injectUrlParams("jdbc:tg:https://host:14200?", props);
         assertEquals(0, count);
     }
 
     @Test
     void maskUrl_redactsPassword() {
-        String masked = TigerGraphSSLWrapper.maskUrl(
+        String masked = TigerGraphWrapperDriver.maskUrl(
                 "jdbc:tg:https://host:14200?graph=G&trustStorePassword=secret&trustStore=/path");
         assertFalse(masked.contains("secret"));
         assertTrue(masked.contains("trustStorePassword=***"));
@@ -62,12 +62,12 @@ class TigerGraphSSLWrapperTest {
 
     @Test
     void maskUrl_nullSafe() {
-        assertNull(TigerGraphSSLWrapper.maskUrl(null));
+        assertNull(TigerGraphWrapperDriver.maskUrl(null));
     }
 
     @Test
     void acceptsURL_acceptsJdbcTgPrefix() throws Exception {
-        TigerGraphSSLWrapper wrapper = createWrapperWithoutDelegate();
+        TigerGraphWrapperDriver wrapper = createWrapperWithoutDelegate();
         // acceptsURL is pure string logic — safe to call without real delegate
         assertTrue(wrapper.acceptsURL("jdbc:tg:https://host:14200"));
         assertTrue(wrapper.acceptsURL("jdbc:tg:http://host:14200"));
@@ -80,9 +80,9 @@ class TigerGraphSSLWrapperTest {
      * the real TigerGraph driver JAR in the classpath). Used only for unit tests
      * that exercise pure logic (acceptsURL, maskUrl, injectUrlParams).
      */
-    private TigerGraphSSLWrapper createWrapperWithoutDelegate() {
+    private TigerGraphWrapperDriver createWrapperWithoutDelegate() {
         try {
-            var ctor = TigerGraphSSLWrapper.class.getDeclaredConstructor();
+            var ctor = TigerGraphWrapperDriver.class.getDeclaredConstructor();
             ctor.setAccessible(true);
             return ctor.newInstance();
         } catch (Exception e) {

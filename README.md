@@ -1,16 +1,16 @@
 # TigerGraph JDBC Wrapper for Starburst
 
-Thin JDBC wrapper that enables TigerGraph SSL connections from Starburst Enterprise (SEP) Generic JDBC connector.
+JDBC wrapper that bridges URL query parameters to driver Properties for the TigerGraph JDBC driver in Starburst Enterprise (SEP).
 
 ## Problem
 
-The TigerGraph `RestppDriver` reads SSL properties (`trustStore`, `trustStorePassword`, `trustStoreType`, `keyStore`, …) from the JDBC `java.util.Properties` object — not from URL query parameters. In HTTPS mode it throws immediately if neither `trustStore` nor `keyStore` is present in Properties.
+The TigerGraph `RestppDriver` reads all connection properties (`graph`, `trustStore`, `trustStorePassword`, `trustStoreType`, `keyStore`, `token`, `queryTimeout`, …) from its `java.util.Properties` object — not from URL query parameters. Starburst Enterprise's Generic JDBC connector has no `connection-properties` passthrough; the only properties it sends to the driver are `connection-user` and `connection-password`.
 
-Starburst Enterprise's Generic JDBC connector has no `connection-properties` passthrough. The only input it sends to the driver Properties object is `connection-user` and `connection-password`.
+This makes it impossible to pass `graph`, SSL settings, or any other TigerGraph driver parameter via a standard catalog configuration.
 
 ## Solution
 
-This wrapper parses URL query parameters and injects them into the Properties object before delegating to the real `RestppDriver`. All SSL config is embedded in `connection-url` — no JVM config changes required.
+This wrapper parses the URL query string, injects each key=value pair into the `Properties` object, and delegates to the real `RestppDriver` with the enriched properties. All TigerGraph driver parameters are embedded in `connection-url` — no JVM config changes required.
 
 ## Deployment
 
@@ -26,7 +26,7 @@ Place both JARs in the Generic JDBC plugin directory on all coordinator and work
 
 ```properties
 connector.name=generic-jdbc
-generic-jdbc.driver-class=io.starburst.jdbc.tigergraph.TigerGraphSSLWrapper
+generic-jdbc.driver-class=io.starburst.jdbc.tigergraph.TigerGraphWrapperDriver
 connection-url=jdbc:tg:https://HOST:14200?graph=MY_GRAPH&trustStore=/usr/lib/jvm/temurin-21/lib/security/cacerts&trustStorePassword=changeit&trustStoreType=JKS
 connection-user=myuser
 connection-password=mypassword

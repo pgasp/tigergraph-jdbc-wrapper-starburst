@@ -14,32 +14,33 @@ import java.sql.SQLFeatureNotSupportedException;
 import java.util.Properties;
 
 /**
- * Thin JDBC wrapper for the TigerGraph JDBC driver (tg-jdbc-driver).
+ * JDBC wrapper for the TigerGraph JDBC driver (tg-jdbc-driver).
  *
- * The TigerGraph RestppDriver reads SSL properties (trustStore, trustStorePassword,
- * trustStoreType, keyStore, …) from its java.util.Properties object — not from URL
- * query parameters. Starburst Enterprise's Generic JDBC connector only passes
- * connection-user and connection-password as driver properties; it has no
- * connection-properties passthrough mechanism.
+ * The TigerGraph RestppDriver reads all connection properties (graph, trustStore,
+ * trustStorePassword, trustStoreType, keyStore, token, queryTimeout, …) from its
+ * java.util.Properties object — not from URL query parameters. Starburst Enterprise's
+ * Generic JDBC connector only passes connection-user and connection-password as driver
+ * Properties; there is no connection-properties passthrough mechanism.
  *
- * This wrapper bridges the gap: it accepts the full jdbc:tg: URL with SSL params
- * embedded as query parameters, parses them, injects them into the Properties object,
- * and delegates to the real RestppDriver. The real driver then finds trustStore in
- * Properties and builds its SSLContext correctly.
+ * This wrapper bridges the gap: it accepts a standard jdbc:tg: URL with any parameters
+ * embedded as query string key=value pairs, parses them, injects them into the
+ * Properties object, and delegates to the real RestppDriver with the enriched Properties.
+ * This makes all TigerGraph driver parameters configurable from the catalog
+ * connection-url — graph name, SSL settings, timeouts, or any other driver option.
  *
  * Sensitive values (password, trustStorePassword, keyStorePassword, token) are
  * redacted in all log output.
  *
  * SEP catalog-values.yaml example:
  *   connector.name=generic-jdbc
- *   generic-jdbc.driver-class=io.starburst.jdbc.tigergraph.TigerGraphSSLWrapper
+ *   generic-jdbc.driver-class=io.starburst.jdbc.tigergraph.TigerGraphWrapperDriver
  *   connection-url=jdbc:tg:https://host:14200?graph=MY_GRAPH&trustStore=/path/to/cacerts&trustStorePassword=changeit&trustStoreType=JKS
  *   connection-user=myuser
  *   connection-password=mypassword
  */
-public class TigerGraphSSLWrapper implements Driver {
+public class TigerGraphWrapperDriver implements Driver {
 
-    private static final Logger log = LoggerFactory.getLogger(TigerGraphSSLWrapper.class);
+    private static final Logger log = LoggerFactory.getLogger(TigerGraphWrapperDriver.class);
 
     private static final String WRAPPER_VERSION = "1.0.0";
     private static final String TG_DRIVER_CLASS = "com.tigergraph.jdbc.restpp.RestppDriver";
@@ -51,7 +52,7 @@ public class TigerGraphSSLWrapper implements Driver {
             TG_DRIVER = (Driver) Class.forName(TG_DRIVER_CLASS)
                     .getDeclaredConstructor()
                     .newInstance();
-            DriverManager.registerDriver(new TigerGraphSSLWrapper());
+            DriverManager.registerDriver(new TigerGraphWrapperDriver());
             log.info("v{} TigerGraph RestppDriver loaded OK", WRAPPER_VERSION);
         } catch (ClassNotFoundException e) {
             log.error("FATAL: TigerGraph JDBC driver not found in classpath — expected class: {} — {}",
