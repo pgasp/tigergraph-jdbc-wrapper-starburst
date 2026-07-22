@@ -42,50 +42,80 @@ public class TigerGraphWrapperDriver implements Driver {
 
     private static final Logger log = LoggerFactory.getLogger(TigerGraphWrapperDriver.class);
 
-    private static final String WRAPPER_VERSION = "1.0.1";
+    private static final String WRAPPER_VERSION = "1.0.2";
     private static final String TG_DRIVER_CLASS = "com.tigergraph.jdbc.Driver";
 
     private static final Driver TG_DRIVER;
 
     static {
+        log.info("v{} initializing — loading TigerGraph driver class: {}", WRAPPER_VERSION, TG_DRIVER_CLASS);
+        Driver driver = null;
         try {
-            TG_DRIVER = (Driver) Class.forName(TG_DRIVER_CLASS)
+            driver = (Driver) Class.forName(TG_DRIVER_CLASS)
                     .getDeclaredConstructor()
                     .newInstance();
-            DriverManager.registerDriver(new TigerGraphWrapperDriver());
-            log.info("v{} TigerGraph RestppDriver loaded OK", WRAPPER_VERSION);
+            log.info("v{} TigerGraph driver class loaded OK — majorVersion={} minorVersion={} jdbcCompliant={}",
+                    WRAPPER_VERSION,
+                    driver.getMajorVersion(),
+                    driver.getMinorVersion(),
+                    driver.jdbcCompliant());
         } catch (ClassNotFoundException e) {
-            log.error("FATAL: TigerGraph JDBC driver not found in classpath — expected class: {} — {}",
-                    TG_DRIVER_CLASS, e.getMessage());
+            log.error("FATAL: TigerGraph JDBC driver class not found: {} — ensure tg-jdbc-driver.jar is in /usr/lib/starburst/plugin/generic-jdbc/",
+                    TG_DRIVER_CLASS, e);
             throw new ExceptionInInitializerError(
                     "TigerGraph JDBC driver (tg-jdbc-driver.jar) not found in classpath: " + e.getMessage());
         } catch (Exception e) {
-            log.error("FATAL: wrapper init failed", e);
+            log.error("FATAL: failed to instantiate TigerGraph driver class: {}", TG_DRIVER_CLASS, e);
+            throw new ExceptionInInitializerError(e);
+        }
+        TG_DRIVER = driver;
+        try {
+            DriverManager.registerDriver(new TigerGraphWrapperDriver());
+            log.info("v{} wrapper registered with DriverManager OK", WRAPPER_VERSION);
+        } catch (SQLException e) {
+            log.error("FATAL: failed to register wrapper with DriverManager", e);
             throw new ExceptionInInitializerError(e);
         }
     }
 
     @Override
     public Connection connect(String url, Properties info) throws SQLException {
+        log.debug("connect() called — url={}", maskUrl(url));
+
         if (!acceptsURL(url)) {
             log.debug("connect() rejected (not a jdbc:tg: URL): {}", maskUrl(url));
             return null;
         }
 
         if (info == null) {
+            log.debug("connect() Properties object is null — creating empty Properties");
             info = new Properties();
         }
 
+        log.debug("connect() Properties before injection: {}", maskProps(info));
         int injected = injectUrlParams(url, info);
-        log.info("connect() url={} injected={} props={}", maskUrl(url), injected, maskProps(info));
+        log.info("connect() url={} injected={} effectiveProps={}", maskUrl(url), injected, maskProps(info));
 
-        Connection conn = TG_DRIVER.connect(url, info);
+        log.debug("connect() delegating to TigerGraph driver: {}", TG_DRIVER_CLASS);
+        Connection conn;
+        try {
+            conn = TG_DRIVER.connect(url, info);
+        } catch (SQLException e) {
+            log.error("connect() FAILED — TigerGraph driver threw SQLException: [SQLState={}] [ErrorCode={}] {}",
+                    e.getSQLState(), e.getErrorCode(), e.getMessage(), e);
+            throw e;
+        } catch (Exception e) {
+            log.error("connect() FAILED — unexpected exception from TigerGraph driver: {}", e.getMessage(), e);
+            throw new SQLException("TigerGraph driver threw unexpected exception: " + e.getMessage(), e);
+        }
+
         if (conn == null) {
-            log.warn("connect() → null (TigerGraph driver rejected URL after property injection): {}", maskUrl(url));
+            log.warn("connect() → null — TigerGraph driver returned null for url={} (URL not accepted by delegate after injection)",
+                    maskUrl(url));
             return null;
         }
 
-        log.debug("connect() TigerGraph driver OK");
+        log.info("connect() SUCCESS — connection established to {}", maskUrl(url));
         return conn;
     }
 
@@ -140,7 +170,15 @@ public class TigerGraphWrapperDriver implements Driver {
 
     @Override
     public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) throws SQLException {
-        return TG_DRIVER.getPropertyInfo(url, info);
+        log.debug("getPropertyInfo() url={}", maskUrl(url));
+        try {
+            DriverPropertyInfo[] result = TG_DRIVER.getPropertyInfo(url, info);
+            log.debug("getPropertyInfo() → {} propert(ies)", result != null ? result.length : 0);
+            return result;
+        } catch (Exception e) {
+            log.error("getPropertyInfo() FAILED: {}", e.getMessage(), e);
+            throw e;
+        }
     }
 
     @Override
