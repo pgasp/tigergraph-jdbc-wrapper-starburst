@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.starburst.jdbc</groupId>
+    <artifactId>tigergraph-jdbc-wrapper</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>TigerGraph JDBC Wrapper for Starburst</name>
+    <description>
+        Thin JDBC driver wrapper that parses URL query parameters and injects them into
+        the driver Properties object before delegating to the TigerGraph RestppDriver.
+        Enables SSL trustStore configuration via connection-url in Starburst Enterprise
+        Generic JDBC connector, which has no connection-properties passthrough.
+        Deploy alongside tg-jdbc-driver.jar — no shading, no patching of SEP internals.
+    </description>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- TigerGraph JDBC driver — loaded at runtime via Class.forName() reflection.
+             Not available on Maven Central; deploy tg-jdbc-driver.jar alongside this
+             wrapper in /usr/lib/starburst/plugin/generic-jdbc/ on the SEP cluster. -->
+
+        <!-- SLF4J API — provided by Trino/SEP runtime; never bundle the binding -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.13</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- SLF4J simple binding for unit tests only -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>2.0.13</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Automatic-Module-Name>io.starburst.jdbc.tigergraph.wrapper</Automatic-Module-Name>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
