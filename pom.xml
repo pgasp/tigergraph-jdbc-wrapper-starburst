@@ -6,7 +6,7 @@
 
     <groupId>io.starburst.jdbc</groupId>
     <artifactId>tigergraph-jdbc-wrapper</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.3</version>
     <packaging>jar</packaging>
 
     <name>TigerGraph JDBC Wrapper for Starburst</name>

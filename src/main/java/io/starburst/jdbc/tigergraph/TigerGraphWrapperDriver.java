@@ -4,11 +4,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.net.URLDecoder;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.DriverPropertyInfo;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.util.Properties;
@@ -42,7 +48,7 @@ public class TigerGraphWrapperDriver implements Driver {
 
     private static final Logger log = LoggerFactory.getLogger(TigerGraphWrapperDriver.class);
 
-    private static final String WRAPPER_VERSION = "1.0.2";
+    private static final String WRAPPER_VERSION = "1.0.3";
     private static final String TG_DRIVER_CLASS = "com.tigergraph.jdbc.Driver";
 
     private static final Driver TG_DRIVER;
@@ -116,7 +122,159 @@ public class TigerGraphWrapperDriver implements Driver {
         }
 
         log.info("connect() SUCCESS — connection established to {}", maskUrl(url));
-        return conn;
+        String graph = info.getProperty("graph");
+        log.debug("connect() wrapping Connection — graph={}", graph);
+        return wrapConnection(conn, graph);
+    }
+
+    // -------------------------------------------------------------------------
+    // Connection wrapper — intercepts getMetaData() to handle unimplemented
+    // metadata methods in the TigerGraph driver (e.g. getSchemas()).
+    // -------------------------------------------------------------------------
+
+    static Connection wrapConnection(Connection conn, String graph) {
+        return (Connection) Proxy.newProxyInstance(
+                TigerGraphWrapperDriver.class.getClassLoader(),
+                new Class<?>[] {Connection.class},
+                new ConnectionHandler(conn, graph));
+    }
+
+    static final class ConnectionHandler implements InvocationHandler {
+        private final Connection delegate;
+        private final String graph;
+
+        ConnectionHandler(Connection delegate, String graph) {
+            this.delegate = delegate;
+            this.graph = graph;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            if ("getMetaData".equals(method.getName()) && (args == null || args.length == 0)) {
+                log.debug("Connection.getMetaData() → wrapping DatabaseMetaData (graph={})", graph);
+                return wrapDatabaseMetaData(delegate.getMetaData(), graph);
+            }
+            log.debug("Connection.{}() → delegating", method.getName());
+            try {
+                return method.invoke(delegate, args);
+            } catch (InvocationTargetException e) {
+                log.error("Connection.{}() FAILED", method.getName(), e.getCause());
+                throw e.getCause();
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // DatabaseMetaData wrapper — intercepts unimplemented methods and returns
+    // synthetic results based on the TigerGraph graph/schema model.
+    // -------------------------------------------------------------------------
+
+    static DatabaseMetaData wrapDatabaseMetaData(DatabaseMetaData meta, String graph) {
+        return (DatabaseMetaData) Proxy.newProxyInstance(
+                TigerGraphWrapperDriver.class.getClassLoader(),
+                new Class<?>[] {DatabaseMetaData.class},
+                new DatabaseMetaDataHandler(meta, graph));
+    }
+
+    static final class DatabaseMetaDataHandler implements InvocationHandler {
+        private final DatabaseMetaData delegate;
+        private final String graph; // TigerGraph graph name — exposed as SQL schema
+
+        DatabaseMetaDataHandler(DatabaseMetaData delegate, String graph) {
+            this.delegate = delegate;
+            this.graph = graph;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            String name = method.getName();
+
+            // getSchemas() / getSchemas(catalog, schemaPattern):
+            // TigerGraph has no SQL schema concept — the graph is the schema.
+            // Return a synthetic single-row ResultSet with graph name as TABLE_SCHEM.
+            if ("getSchemas".equals(name)) {
+                String schemaPattern = (args != null && args.length == 2) ? (String) args[1] : null;
+                log.info("meta.getSchemas(schemaPattern={}) → returning synthetic schema: graph={}",
+                        schemaPattern, graph);
+                return syntheticSchemasResultSet(graph, schemaPattern);
+            }
+
+            log.debug("meta.{}() → delegating to TigerGraph driver", name);
+            try {
+                return method.invoke(delegate, args);
+            } catch (InvocationTargetException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof UnsupportedOperationException) {
+                    log.warn("meta.{}() not implemented by TigerGraph driver — returning null: {}",
+                            name, cause.getMessage());
+                    // Return safe defaults for methods that are called by Starburst but not
+                    // implemented by the TigerGraph driver.
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType == boolean.class)  return false;
+                    if (returnType == int.class)       return 0;
+                    if (returnType == String.class)    return null;
+                    if (returnType == ResultSet.class) return emptyResultSet();
+                    return null;
+                }
+                log.error("meta.{}() FAILED", name, cause);
+                throw cause;
+            }
+        }
+    }
+
+    /**
+     * Synthetic ResultSet for getSchemas() — returns a single row with the graph
+     * name as TABLE_SCHEM and null as TABLE_CATALOG.
+     * If schemaPattern is non-null, the row is only returned when it matches.
+     */
+    static ResultSet syntheticSchemasResultSet(String graph, String schemaPattern) {
+        boolean include = graph != null
+                && (schemaPattern == null || graph.matches(schemaPattern.replace("%", ".*")));
+        String[] row = include ? new String[]{graph, null} : null;
+        int[] cursor = {-1};
+
+        return (ResultSet) Proxy.newProxyInstance(
+                TigerGraphWrapperDriver.class.getClassLoader(),
+                new Class<?>[] {ResultSet.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "next":    return row != null && ++cursor[0] < 1;
+                        case "close":   return null;
+                        case "wasNull": return Boolean.FALSE;
+                        case "getString": {
+                            if (row == null || cursor[0] < 0) return null;
+                            Object key = args[0];
+                            if (key instanceof String) {
+                                switch (((String) key).toUpperCase()) {
+                                    case "TABLE_SCHEM":   return row[0];
+                                    case "TABLE_CATALOG": return row[1];
+                                }
+                            } else if (key instanceof Integer) {
+                                int idx = (Integer) key;
+                                return (idx == 1) ? row[0] : (idx == 2) ? row[1] : null;
+                            }
+                            return null;
+                        }
+                        default:
+                            throw new UnsupportedOperationException(
+                                    "syntheticSchemasResultSet: " + method.getName() + " not implemented");
+                    }
+                });
+    }
+
+    /** Empty ResultSet for metadata methods that have no meaningful TigerGraph equivalent. */
+    static ResultSet emptyResultSet() {
+        return (ResultSet) Proxy.newProxyInstance(
+                TigerGraphWrapperDriver.class.getClassLoader(),
+                new Class<?>[] {ResultSet.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "next":    return Boolean.FALSE;
+                        case "close":   return null;
+                        case "wasNull": return Boolean.FALSE;
+                        default:        return null;
+                    }
+                });
     }
 
     /**
