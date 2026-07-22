@@ -48,7 +48,7 @@ public class TigerGraphWrapperDriver implements Driver {
 
     private static final Logger log = LoggerFactory.getLogger(TigerGraphWrapperDriver.class);
 
-    private static final String WRAPPER_VERSION = "1.0.3";
+    private static final String WRAPPER_VERSION = "1.0.4";
     private static final String TG_DRIVER_CLASS = "com.tigergraph.jdbc.Driver";
 
     private static final Driver TG_DRIVER;
@@ -199,17 +199,45 @@ public class TigerGraphWrapperDriver implements Driver {
                 return syntheticSchemasResultSet(graph, schemaPattern);
             }
 
+            // getIdentifierQuoteString(): TigerGraph uses standard SQL double-quote.
+            // Starburst uses this to quote identifiers in generated SQL — must not throw.
+            if ("getIdentifierQuoteString".equals(name)) {
+                log.debug("meta.getIdentifierQuoteString() → returning '\"' (standard SQL)");
+                return "\"";
+            }
+
+            // getTables(): TigerGraph exposes GSQL queries as tables but does not implement
+            // standard JDBC metadata for them. Return empty ResultSet — direct SQL queries
+            // still work; catalog browsing will show no tables.
+            if ("getTables".equals(name)) {
+                log.warn("meta.getTables(catalog={} schemaPattern={} tablePattern={}) → returning empty ResultSet " +
+                        "(TigerGraph tables are GSQL queries — not discoverable via JDBC metadata)",
+                        args != null && args.length > 0 ? args[0] : null,
+                        args != null && args.length > 1 ? args[1] : null,
+                        args != null && args.length > 2 ? args[2] : null);
+                return emptyResultSet();
+            }
+
+            // getColumns(): not implemented — return empty ResultSet.
+            // Starburst will not show column metadata in the catalog browser,
+            // but queries with explicit column names will still execute.
+            if ("getColumns".equals(name)) {
+                log.warn("meta.getColumns() → returning empty ResultSet (not implemented by TigerGraph driver)");
+                return emptyResultSet();
+            }
+
             log.debug("meta.{}() → delegating to TigerGraph driver", name);
             try {
                 return method.invoke(delegate, args);
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
                 if (cause instanceof UnsupportedOperationException) {
-                    log.warn("meta.{}() not implemented by TigerGraph driver — returning null: {}",
-                            name, cause.getMessage());
-                    // Return safe defaults for methods that are called by Starburst but not
-                    // implemented by the TigerGraph driver.
+                    // Nearly all DatabaseMetaData methods are not implemented by the TigerGraph
+                    // driver. Return safe defaults to prevent Starburst from crashing on
+                    // capability checks.
                     Class<?> returnType = method.getReturnType();
+                    log.warn("meta.{}() not implemented by TigerGraph driver — returning safe default ({}) : {}",
+                            name, returnType.getSimpleName(), cause.getMessage());
                     if (returnType == boolean.class)  return false;
                     if (returnType == int.class)       return 0;
                     if (returnType == String.class)    return null;
